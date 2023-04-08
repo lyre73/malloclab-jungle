@@ -225,6 +225,7 @@ static void *coalesce(void *bp)
     return bp;  // returns current block(newly coalesced block)'s start address
 }
 
+/* finds free block to place the new allocation, by first-fit */
 static void *find_fit(size_t asize) // asize: bytes
 {
     // 처음부터 프롤로그 풋터->블록 헤더->블록 헤더->블록 헤더->에필로그 헤더까지 돌면서 맞는 사이즈 있으면 그 주소 반환
@@ -246,10 +247,11 @@ static void place(void *bp, size_t asize)
     // splitting only if the size of the remainder would equal or exeed the minimum block size
     size_t currentsize = GET_SIZE(HDRP(bp));
     if (currentsize - asize >= 2 * DSIZE) { // the remainder would equal or exeed the minimum block size, split
-        PUT(FTRP(bp), PACK(currentsize-asize, 0));            // update footer of remainder free block, which was original footer
-        PUT(HDRP(bp) + (asize), PACK(currentsize-asize, 0));  // update header of remainder free block
-        PUT(HDRP(bp), PACK(asize, 1));                        // update new allocated header, which was original header
-        PUT(HDRP(bp) + (asize) - (WSIZE), PACK(asize, 1));    // update new allocated footer
+        PUT(HDRP(bp), PACK(asize, 1));              // update new allocated header, which was original header
+        PUT(FTRP(bp), PACK(asize, 1));              // update new allocated footer
+        bp = NEXT_BLKP(bp);                         // update bp to point to remainder free block
+        PUT(HDRP(bp), PACK(currentsize-asize, 0));  // update header of remainder free block
+        PUT(FTRP(bp), PACK(currentsize-asize, 0));  // update footer of remainder free block, which was original footer
 
     } else { // don't split
         // update header and footer, say allocated!
