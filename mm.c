@@ -161,7 +161,7 @@ void *mm_realloc(void *ptr, size_t size)
     if (newptr == NULL)
       return NULL;
     // copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);   // oldptr (payload?) size?
-    copySize = GET_SIZE(HDRP(oldptr)) - DSIZE;  // hmmm
+    copySize = GET_SIZE(HDRP(oldptr)) - DSIZE;  // only payload size
     if (size < copySize)
       copySize = size;  // copySize is smaller one
     memcpy(newptr, oldptr, copySize);
@@ -198,24 +198,22 @@ static void *coalesce(void *bp)
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); // next block is allocated: 1, else: 0
     size_t size = GET_SIZE(HDRP(bp));                   // size of current block
 
-    if (prev_alloc && next_alloc) {             /* Case 1, only current block is free */
-        return bp;
-    }
+    /* no need to use Case 1, only curre */
 
-    else if (prev_alloc && !next_alloc) {       /* Case 2, current and next!!!!!!!!!!! block is free */
+    if (prev_alloc && !next_alloc) {            /* Case 2, current and next block are free */
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));  // update size of current block: add next block size
         PUT(HDRP(bp), PACK(size, 0));           // update header
         PUT(FTRP(bp), PACK(size, 0));           // update footer which originally was next block's footer
     }
 
-    else if (!prev_alloc && next_alloc) {       /* Case 3, current and next block is free */
+    else if (!prev_alloc && next_alloc) {       /* Case 3, current and prev block are free */
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));  // update size of current block: add prev block size
         PUT(FTRP(bp), PACK(size, 0));           // update footer
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));// update header which originally was prev block's header
         bp = PREV_BLKP(bp);                     // update current block pointer to original prev block's pointer
     }
 
-    else {                                      /* Case 4 */
+    else if (!prev_alloc && !next_alloc) {      /* Case 4, current and adjecent blocks are free */
         // update size of current block: add prev and next blocks' size 
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));// update header which originally was prev block's header
@@ -232,8 +230,8 @@ static void *find_fit(size_t asize) // asize: bytes
     void *bp = heap_listp; // points prologue block
     size_t size = GET_SIZE(HDRP(bp)); // = GET_SIZE(bp); // bytes
     while (size > 0) { // until epilogue block
-        if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize)) {
-            return bp;}
+        if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize))
+            return bp;
         // update bp and currentsize
         bp = NEXT_BLKP(bp);
         size = GET_SIZE(HDRP(bp));
