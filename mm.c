@@ -204,9 +204,9 @@ static void *coalesce(void *bp)
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); // next block is allocated: 1, else: 0
     size_t size = GET_SIZE(HDRP(bp));                   // size of current block
 
-    int flag = 0;
-    if (findptr == bp || findptr == PREV_BLKP(bp) || findptr == NEXT_BLKP(bp))
-        flag = 1;
+    // int flag = 0;
+    // if (findptr == bp || findptr == PREV_BLKP(bp) || findptr == NEXT_BLKP(bp))
+    //     flag = 1;
     if (prev_alloc && next_alloc)               /* Case 1, only current block is free */
         {}
 
@@ -230,8 +230,7 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));// update footer which originally was next block's footer
         bp = PREV_BLKP(bp);                     // update current block pointer to original prev block's pointer
     }
-    if (flag)
-        findptr = bp;
+    findptr = bp;
     return bp;  // returns current block(newly coalesced block)'s start address
 }
 
@@ -245,7 +244,7 @@ static void *find_fit(size_t asize) // asize: bytes
     // 없으면 처음부터 마지막 탐색 블록 마주칠때까지 돌면서 맞는 사이즈 있으면 그 주소 반환
     while (size > 0) { // until epilogue block
         if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize)) {
-            findptr = NEXT_BLKP(bp);
+            findptr = bp;
             return bp;
         }
         // update bp and currentsize
@@ -256,7 +255,7 @@ static void *find_fit(size_t asize) // asize: bytes
     size = GET_SIZE(HDRP(bp));
     while (bp != findptr && size > 0) {
         if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize)) {
-            findptr = NEXT_BLKP(bp);
+            findptr = bp;
             return bp;
         }
         // update bp and currentsize
@@ -284,6 +283,7 @@ static void place(void *bp, size_t asize)
         PUT(HDRP(bp), PACK(currentsize, 1));
         PUT(FTRP(bp), PACK(currentsize, 1));
     }
+    findptr = bp;
 }
 
 
