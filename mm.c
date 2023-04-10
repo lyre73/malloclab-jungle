@@ -82,27 +82,8 @@ static void place(void *, size_t);
 
 static void *heap_listp;
 
-// #define IMPLICIT
 /* +) explicit free list */
 
-#ifndef IMPLICIT
-    #define EXPLICIT
-#endif
-
-#ifdef EXPLICIT
-    #define PUTP(p, val)    (*(char **)(p) = (val))     /* put pointer to given word(address). get the start address of payload of the target block and store val(address of payload of target block)) */
-
-    #define PREDP(bp)       ((char *)(bp))              /* get start address of payload, return address of the block PRED */
-    #define SUCCP(bp)       ((char *)((bp) + WSIZE))      /* get start address of payload, return address of the block SUCC */
-
-    #define PRED_BLKP(bp)   *((char **)(bp))            /* get start address of a block's payload, return the address of payload of predecessor block */
-    #define SUCC_BLKP(bp)   *((char **)((bp) + WSIZE))    /* get start address of a block's payload, return the address of payload of successor block */
-
-    int splice_out(void *);
-    int splice_in(void *bp);
-
-    static char *free_listp;
-#endif
 /* 
  * mm_init - initialize the malloc package. return 0 if successful, -1 otherwise.
  */
@@ -117,9 +98,6 @@ int mm_init(void)
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));    /* Prologue footer */
     PUT(heap_listp + (3*WSIZE), PACK(0, 1));        /* Epilogue header */
     heap_listp += (2*WSIZE);                        /* heap_listp (always) points prologue block */
-    #ifdef EXPLICIT
-        free_listp = NULL;
-    #endif
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL)   // if fails //HERE
         return -1;
@@ -230,18 +208,12 @@ static void *coalesce(void *bp)
         {}  // no need
 
     else if (prev_alloc && !next_alloc) {       /* Case 2, current and next block is free */
-        #ifdef EXPLICIT
-            splice_out(NEXT_BLKP(bp));
-        #endif
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));  // update size of current block: add next block size
         PUT(HDRP(bp), PACK(size, 0));           // update header
         PUT(FTRP(bp), PACK(size, 0));           // update footer which originally was next block's footer
     }
 
     else if (!prev_alloc && next_alloc) {       /* Case 3, current and prev block is free */
-        #ifdef EXPLICIT
-            splice_out(PREV_BLKP(bp));
-        #endif
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));  // update size of current block: add prev block size
         PUT(FTRP(bp), PACK(size, 0));           // update footer
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));// update header which originally was prev block's header
@@ -249,20 +221,12 @@ static void *coalesce(void *bp)
     }
 
     else {                                      /* Case 4 */
-        #ifdef EXPLICIT
-            splice_out(PREV_BLKP(bp));
-            splice_out(NEXT_BLKP(bp));
-        #endif
         // update size of current block: add prev and next blocks' size 
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));// update header which originally was prev block's header
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));// update footer which originally was next block's footer
         bp = PREV_BLKP(bp);                     // update current block pointer to original prev block's pointer
     }
-
-    #ifdef EXPLICIT
-        splice_in(bp);
-    #endif
 
     return bp;  // returns current block(newly coalesced block)'s start address
 }
@@ -271,31 +235,17 @@ static void *coalesce(void *bp)
 static void *find_fit(size_t asize) // asize: bytes
 {
     // printf("find_fit ");
-    
-    #ifdef EXPLICIT
-        // TODO: first fit for LIFO explicit list
-        void *bp = free_listp; // points first block in free list
-        size_t size;
-        // 처음부터 프롤로그SUCC->SUCC->SUCC->NULL일 까지 돌면서 맞는 사이즈 있으면 그 주소 반환
-        while (bp != NULL) {
-            size = GET_SIZE(HDRP(bp));
-            if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize))
-                return bp;
-            bp = SUCC_BLKP(bp);
-        }
-    #endif
-    #ifdef IMPLICIT
-        void *bp = heap_listp; // points prologue block
-        size_t size = GET_SIZE(HDRP(bp)); // bytes
-        // 처음부터 프롤로그 풋터->블록 헤더->블록 헤더->블록 헤더->에필로그 헤더까지 돌면서 맞는 사이즈 있으면 그 주소 반환
-        while (size > 0) { // until epilogue block
-            if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize))
-                return bp;
-            // update bp and currentsize
-            bp = NEXT_BLKP(bp);
-            size = GET_SIZE(HDRP(bp));
-        }
-    #endif
+    void *bp = heap_listp; // points prologue block
+    size_t size = GET_SIZE(HDRP(bp)); // bytes
+    // 처음부터 프롤로그 풋터->블록 헤더->블록 헤더->블록 헤더->에필로그 헤더까지 돌면서 맞는 사이즈 있으면 그 주소 반환
+    while (size > 0) { // until epilogue block
+        if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize))
+            return bp;
+        // update bp and currentsize
+        bp = NEXT_BLKP(bp);
+        size = GET_SIZE(HDRP(bp));
+    }
+
     return NULL;
 }
 
@@ -305,18 +255,13 @@ static void place(void *bp, size_t asize)
     // place requested block at the beginning of the current free block(bp),
     // splitting only if the size of the remainder would equal or exeed the minimum block size
     size_t currentsize = GET_SIZE(HDRP(bp));
-    #ifdef EXPLICIT
-        splice_out(bp);
-    #endif
     if (currentsize - asize >= 2 * DSIZE) { // the remainder would equal or exeed the minimum block size, split
         PUT(HDRP(bp), PACK(asize, 1));              // update new allocated header, which was original header
         PUT(FTRP(bp), PACK(asize, 1));              // update new allocated footer
         bp = NEXT_BLKP(bp);                         // update bp to point to remainder free block
         PUT(HDRP(bp), PACK(currentsize-asize, 0));  // update header of remainder free block
         PUT(FTRP(bp), PACK(currentsize-asize, 0));  // update footer of remainder free block, which was original footer
-        #ifdef EXPLICIT
-            splice_in(bp); // splice new remainder free block into the free list
-        #endif
+        
     } else { // don't split
         // update header and footer, say allocated!
         PUT(HDRP(bp), PACK(currentsize, 1));
@@ -324,39 +269,6 @@ static void place(void *bp, size_t asize)
     }
 }
 
-#ifdef EXPLICIT
-    int splice_out(void *bp)
-    {
-        // printf("splice_out ");
-        /* splice out the block(bp) from the list */
-        // update predecessor block's successor <- block's successor
-        if (PRED_BLKP(bp) != NULL) {
-            PUTP(SUCCP(PRED_BLKP(bp)), SUCC_BLKP(bp));
-        } else {
-            free_listp = SUCC_BLKP(bp);
-        }
-        // update successor block's predecessor <- block's predecessor
-        if (SUCC_BLKP(bp) != NULL)
-            PUTP(PREDP(SUCC_BLKP(bp)), PRED_BLKP(bp));
-
-        return 0;
-    }
-
-    int splice_in(void *bp)
-    {
-        // printf("splice_in ");
-        // update PRED, SUCC of new free block
-        PUTP(PREDP(bp), NULL);                      // update PRED of new free block
-        PUTP(SUCCP(bp), free_listp);                // initialize SUCC of new free block
-
-        if (free_listp != NULL) {                   // if the list was not empty
-            PUTP(PREDP(free_listp), bp);          // update PRED of previously first free block(previously SUCC of root)
-        }
-        free_listp = bp;                // update root(free_listp)
-
-        return 0;
-    }
-#endif
 
 
 
