@@ -90,18 +90,13 @@ static void *heap_listp;
 #endif
 
 #ifdef EXPLICIT
-    #define PUTP(p, val)    (*(char **)(p) = (val))     /* put pointer to given word(address). get the start address of payload of the target block and store val(address of payload of target block)) */
-
-    #define PREDP(bp)       ((char *)(bp))              /* get start address of payload, return address of the block PRED */
-    #define SUCCP(bp)       ((char *)((bp) + WSIZE))      /* get start address of payload, return address of the block SUCC */
-
-    #define PRED_BLKP(bp)   *((char **)(bp))            /* get start address of a block's payload, return the address of payload of predecessor block */
-    #define SUCC_BLKP(bp)   *((char **)((bp) + WSIZE))    /* get start address of a block's payload, return the address of payload of successor block */
+    #define SUCC_BLKP(bp)   *((char **)(bp))            /* get start address of a block's payload, return the address of payload of predecessor block */
+    #define PRED_BLKP(bp)   *((char **)((bp) + WSIZE))    /* get start address of a block's payload, return the address of payload of successor block */
 
     int splice_out(void *);
     int splice_in(void *bp);
 
-    static char *free_listp;
+    // static char *free_listp;
 #endif
 /* 
  * mm_init - initialize the malloc package. return 0 if successful, -1 otherwise.
@@ -110,16 +105,15 @@ int mm_init(void)
 {
     // printf("init\n");
     /* Create the initial empty heap */
-    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) /* extends heap by 4 words and returns start address of new area. if fails, return -1 */
+    if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1) /* extends heap by 6 words and returns start address of new area. if fails, return -1 */
         return -1;
     PUT(heap_listp, 0);                             /* Alignment padding */
-    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));    /* Prologue header */
-    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));    /* Prologue footer */
-    PUT(heap_listp + (3*WSIZE), PACK(0, 1));        /* Epilogue header */
+    PUT(heap_listp + (1*WSIZE), PACK(2*DSIZE, 1));    /* Prologue header */
+    PUT(heap_listp + (2*WSIZE), (unsigned int)NULL);/* Prologue SUCC */
+    PUT(heap_listp + (3*WSIZE), (unsigned int)NULL);/* Prologue PRED*/
+    PUT(heap_listp + (4*WSIZE), PACK(2*DSIZE, 1));    /* Prologue footer */
+    PUT(heap_listp + (5*WSIZE), PACK(0, 1));        /* Epilogue header */
     heap_listp += (2*WSIZE);                        /* heap_listp (always) points prologue block */
-    #ifdef EXPLICIT
-        free_listp = NULL;
-    #endif
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL)   // if fails //HERE
         return -1;
@@ -274,26 +268,22 @@ static void *find_fit(size_t asize) // asize: bytes
     
     #ifdef EXPLICIT
         // TODO: first fit for LIFO explicit list
-        void *bp = free_listp; // points first block in free list
-        size_t size;
+        void *bp = SUCC_BLKP(heap_listp); // points first block in free list
         // 처음부터 프롤로그SUCC->SUCC->SUCC->NULL일 까지 돌면서 맞는 사이즈 있으면 그 주소 반환
         while (bp != NULL) {
-            size = GET_SIZE(HDRP(bp));
-            if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize))
+            if (GET_SIZE(HDRP(bp)) >= asize)
                 return bp;
             bp = SUCC_BLKP(bp);
         }
     #endif
     #ifdef IMPLICIT
         void *bp = heap_listp; // points prologue block
-        size_t size = GET_SIZE(HDRP(bp)); // bytes
         // 처음부터 프롤로그 풋터->블록 헤더->블록 헤더->블록 헤더->에필로그 헤더까지 돌면서 맞는 사이즈 있으면 그 주소 반환
-        while (size > 0) { // until epilogue block
-            if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize))
+        while (GET_SIZE(HDRP(bp)) > 0) { // until epilogue block
+            if ((GET_ALLOC(HDRP(bp)) == 0) && (GET_SIZE(HDRP(bp)) >= asize))
                 return bp;
-            // update bp and currentsize
+            // update bp
             bp = NEXT_BLKP(bp);
-            size = GET_SIZE(HDRP(bp));
         }
     #endif
     return NULL;
@@ -330,14 +320,10 @@ static void place(void *bp, size_t asize)
         // printf("splice_out ");
         /* splice out the block(bp) from the list */
         // update predecessor block's successor <- block's successor
-        if (PRED_BLKP(bp) != NULL) {
-            PUTP(SUCCP(PRED_BLKP(bp)), SUCC_BLKP(bp));
-        } else {
-            free_listp = SUCC_BLKP(bp);
-        }
+        SUCC_BLKP(PRED_BLKP(bp)) = SUCC_BLKP(bp);
         // update successor block's predecessor <- block's predecessor
         if (SUCC_BLKP(bp) != NULL)
-            PUTP(PREDP(SUCC_BLKP(bp)), PRED_BLKP(bp));
+            PRED_BLKP(SUCC_BLKP(bp)) = PRED_BLKP(bp);
 
         return 0;
     }
@@ -345,15 +331,24 @@ static void place(void *bp, size_t asize)
     int splice_in(void *bp)
     {
         // printf("splice_in ");
-        // update PRED, SUCC of new free block
-        PUTP(PREDP(bp), NULL);                      // update PRED of new free block
-        PUTP(SUCCP(bp), free_listp);                // initialize SUCC of new free block
 
-        if (free_listp != NULL) {                   // if the list was not empty
-            PUTP(PREDP(free_listp), bp);          // update PRED of previously first free block(previously SUCC of root)
+        // bp의 전임 블록(반드시 있음, 프롤로그 블록) 찾기, 중간에 NULL 만나면 얘가 맨 마지막이라는 뜻.
+        void *pred = heap_listp;
+
+        while ((void *)SUCC_BLKP(pred) < bp) {
+            if (SUCC_BLKP(pred) == NULL) {
+                SUCC_BLKP(bp) = NULL;
+                PRED_BLKP(bp) = pred;
+                SUCC_BLKP(pred) = bp;
+                return 0;
+            }
+            pred = SUCC_BLKP(pred);
         }
-        free_listp = bp;                // update root(free_listp)
-
+        SUCC_BLKP(bp) = SUCC_BLKP(pred);
+        PRED_BLKP(bp) = pred;
+        PRED_BLKP(SUCC_BLKP(pred)) = bp;
+        SUCC_BLKP(pred) = bp;
+        
         return 0;
     }
 #endif
