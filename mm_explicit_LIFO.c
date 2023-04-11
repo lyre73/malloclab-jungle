@@ -90,8 +90,6 @@ static void *heap_listp;
 #endif
 
 #ifdef EXPLICIT
-    #define PUTP(p, val)    (*(char **)(p) = (val))     /* put pointer to given word(address). get the start address of payload of the target block and store val(address of payload of target block)) */
-
     #define SUCCP(bp)       ((char *)(bp))              /* get start address of payload, return address of the block PRED */
     #define PREDP(bp)       ((char *)((bp) + WSIZE))      /* get start address of payload, return address of the block SUCC */
 
@@ -327,13 +325,13 @@ static void place(void *bp, size_t asize)
         /* splice out the block(bp) from the list */
         // update predecessor block's successor <- block's successor
         if (PRED_BLKP(bp) != NULL) {
-            PUTP(SUCCP(PRED_BLKP(bp)), SUCC_BLKP(bp));
+            SUCC_BLKP(PRED_BLKP(bp)) = SUCC_BLKP(bp);
         } else {
             free_listp = SUCC_BLKP(bp);
         }
         // update successor block's predecessor <- block's predecessor
         if (SUCC_BLKP(bp) != NULL)
-            PUTP(PREDP(SUCC_BLKP(bp)), PRED_BLKP(bp));
+            PRED_BLKP(SUCC_BLKP(bp)) = PRED_BLKP(bp);
 
         return 0;
     }
@@ -341,12 +339,12 @@ static void place(void *bp, size_t asize)
     int splice_in(void *bp)
     {
         // printf("splice_in ");
-        // update PRED, SUCC of new free block
-        PUTP(PREDP(bp), NULL);                      // update PRED of new free block
-        PUTP(SUCCP(bp), free_listp);                // initialize SUCC of new free block
+        // update PRED, SUCC of new free block                  
+        PRED_BLKP(bp) = NULL;               // update PRED of new free block
+        SUCC_BLKP(bp) = free_listp;         // initialize SUCC of new free block
 
-        if (free_listp != NULL) {                   // if the list was not empty
-            PUTP(PREDP(free_listp), bp);          // update PRED of previously first free block(previously SUCC of root)
+        if (free_listp != NULL) {           // if the list was not empty
+            PRED_BLKP(free_listp) = bp;     // update PRED of previously first free block(previously SUCC of root)
         }
         free_listp = bp;                // update root(free_listp)
 
