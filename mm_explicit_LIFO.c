@@ -90,9 +90,6 @@ static void *heap_listp;
 #endif
 
 #ifdef EXPLICIT
-    #define SUCCP(bp)       ((char *)(bp))              /* get start address of payload, return address of the block PRED */
-    #define PREDP(bp)       ((char *)((bp) + WSIZE))      /* get start address of payload, return address of the block SUCC */
-
     #define SUCC_BLKP(bp)   *((char **)(bp))            /* get start address of a block's payload, return the address of payload of predecessor block */
     #define PRED_BLKP(bp)   *((char **)((bp) + WSIZE))    /* get start address of a block's payload, return the address of payload of successor block */
 
