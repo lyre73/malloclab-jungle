@@ -272,7 +272,7 @@ static void *find_fit(size_t asize) // asize: bytes
         void *bp = free_listp; // points first block in free list
         // 처음부터 프롤로그SUCC->SUCC->SUCC->NULL일 까지 돌면서 맞는 사이즈 있으면 그 주소 반환
         while (bp != NULL) {
-            if ((GET_ALLOC(HDRP(bp)) == 0) && (GET_SIZE(HDRP(bp)) >= asize))
+            if (GET_SIZE(HDRP(bp)) >= asize)
                 return bp;
             bp = SUCC_BLKP(bp);
         }
@@ -280,10 +280,10 @@ static void *find_fit(size_t asize) // asize: bytes
     #ifdef IMPLICIT
         void *bp = heap_listp; // points prologue block
         // 처음부터 프롤로그 풋터->블록 헤더->블록 헤더->블록 헤더->에필로그 헤더까지 돌면서 맞는 사이즈 있으면 그 주소 반환
-        while (size > 0) { // until epilogue block
+        while (GET_SIZE(HDRP(bp)) > 0) { // until epilogue block
             if ((GET_ALLOC(HDRP(bp)) == 0) && (GET_SIZE(HDRP(bp)) >= asize))
                 return bp;
-            // update bp and currentsize
+            // update bp
             bp = NEXT_BLKP(bp);
         }
     #endif
