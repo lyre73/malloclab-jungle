@@ -92,11 +92,11 @@ static void *heap_listp;
 #ifdef EXPLICIT
     #define PUTP(p, val)    (*(char **)(p) = (val))     /* put pointer to given word(address). get the start address of payload of the target block and store val(address of payload of target block)) */
 
-    #define PREDP(bp)       ((char *)(bp))              /* get start address of payload, return address of the block PRED */
-    #define SUCCP(bp)       ((char *)((bp) + WSIZE))      /* get start address of payload, return address of the block SUCC */
+    #define SUCCP(bp)       ((char *)(bp))              /* get start address of payload, return address of the block PRED */
+    #define PREDP(bp)       ((char *)((bp) + WSIZE))      /* get start address of payload, return address of the block SUCC */
 
-    #define PRED_BLKP(bp)   *((char **)(bp))            /* get start address of a block's payload, return the address of payload of predecessor block */
-    #define SUCC_BLKP(bp)   *((char **)((bp) + WSIZE))    /* get start address of a block's payload, return the address of payload of successor block */
+    #define SUCC_BLKP(bp)   *((char **)(bp))            /* get start address of a block's payload, return the address of payload of predecessor block */
+    #define PRED_BLKP(bp)   *((char **)((bp) + WSIZE))    /* get start address of a block's payload, return the address of payload of successor block */
 
     int splice_out(void *);
     int splice_in(void *bp);
@@ -254,7 +254,7 @@ static void *coalesce(void *bp)
             splice_out(NEXT_BLKP(bp));
         #endif
         // update size of current block: add prev and next blocks' size 
-        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));// update header which originally was prev block's header
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));// update footer which originally was next block's footer
         bp = PREV_BLKP(bp);                     // update current block pointer to original prev block's pointer
@@ -275,25 +275,21 @@ static void *find_fit(size_t asize) // asize: bytes
     #ifdef EXPLICIT
         // TODO: first fit for LIFO explicit list
         void *bp = free_listp; // points first block in free list
-        size_t size;
         // 처음부터 프롤로그SUCC->SUCC->SUCC->NULL일 까지 돌면서 맞는 사이즈 있으면 그 주소 반환
         while (bp != NULL) {
-            size = GET_SIZE(HDRP(bp));
-            if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize))
+            if ((GET_ALLOC(HDRP(bp)) == 0) && (GET_SIZE(HDRP(bp)) >= asize))
                 return bp;
             bp = SUCC_BLKP(bp);
         }
     #endif
     #ifdef IMPLICIT
         void *bp = heap_listp; // points prologue block
-        size_t size = GET_SIZE(HDRP(bp)); // bytes
         // 처음부터 프롤로그 풋터->블록 헤더->블록 헤더->블록 헤더->에필로그 헤더까지 돌면서 맞는 사이즈 있으면 그 주소 반환
         while (size > 0) { // until epilogue block
-            if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize))
+            if ((GET_ALLOC(HDRP(bp)) == 0) && (GET_SIZE(HDRP(bp)) >= asize))
                 return bp;
             // update bp and currentsize
             bp = NEXT_BLKP(bp);
-            size = GET_SIZE(HDRP(bp));
         }
     #endif
     return NULL;
