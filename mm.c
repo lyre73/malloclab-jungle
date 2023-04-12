@@ -171,7 +171,7 @@ void mm_free(void *ptr) // ptr is start address of the block we want to free
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    printf("realloc\n");
+    // printf("realloc\n");
     // if made other functions well, it would work good without changing any(maybe)
     void *oldptr = ptr; // initiallize oldptr to given ptr
     void *newptr;
@@ -261,19 +261,14 @@ static void *find_fit(size_t asize) // asize: bytes
     size_t min_disparity = SIZE_MAX;
     void *best_fit = NULL;
     
-    for (int class = get_class(asize); class <= 11; class++){
-        min_disparity = (1<<(class+2));
-        void *bp = *FREE_LIST(class); // points first block in free list
-        // 처음부터 프롤로그SUCC->SUCC->SUCC->NULL일 까지 돌면서 맞는 사이즈 있으면 그 주소 반환
-        while (bp != NULL) {
-            size_t disparity = GET_SIZE(HDRP(bp)) - asize;
-            if (disparity == 0) {
+    for (int class = get_class(asize); class <= 11; class++) {
+        for (void *bp = *FREE_LIST(class); bp != NULL; bp = SUCC_BLKP(bp)) {
+            if (GET_SIZE(HDRP(bp)) == asize) {
                 return bp;
-            } else if (disparity > 0 && min_disparity > disparity) {
+            } else if (GET_SIZE(HDRP(bp)) > asize && min_disparity > GET_SIZE(HDRP(bp)) - asize) {
                 best_fit = bp;
-                min_disparity = disparity;
+                min_disparity = GET_SIZE(HDRP(bp)) - asize;
             }
-            bp = SUCC_BLKP(bp);
         }
         if (best_fit != NULL) {
             break;
@@ -308,7 +303,6 @@ static void place(void *bp, size_t asize)
 int splice_out(void *bp)
 {
     // printf("splice_out ");
-    // printf("(removing block size: %d, remove from class %d) ", GET_SIZE(HDRP(bp)), get_class(GET_SIZE(HDRP(bp))));
     /* splice out the block(bp) from the list */
     // update predecessor block's successor <- block's successor
     if (PRED_BLKP(bp) != NULL) {
@@ -324,7 +318,7 @@ int splice_out(void *bp)
     return 0;
 }
 
-int splice_in(void *bp)
+int splice_in(void *bp) // 크기 내림차순으로 정렬해서 리스트에 넣기
 {
     // printf("splice_in ");
     int class = get_class(GET_SIZE(HDRP(bp)));
