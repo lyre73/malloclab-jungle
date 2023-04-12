@@ -89,7 +89,7 @@ int splice_out(void *);
 int splice_in(void *bp);
 int get_class(size_t size); // 사이즈 클래스 찾기
 
-static void *free_listp[12];
+void *free_listp[12];
 
 /* 
  * mm_init - initialize the malloc package. return 0 if successful, -1 otherwise.
@@ -98,14 +98,12 @@ int mm_init(void)
 {
     // printf("init\n");
     /* Create the initial empty heap */
-    if ((heap_listp = mem_sbrk(6*WSIZE)) == (void *)-1) /* extends heap by 6 words and returns start address of new area. if fails, return -1 */
+    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) /* extends heap by 6 words and returns start address of new area. if fails, return -1 */
         return -1;
     PUT(heap_listp, 0);                             /* Alignment padding */
     PUT(heap_listp + (1*WSIZE), PACK(2*DSIZE, 1));  /* Prologue header */
-    PUT(heap_listp + (2*WSIZE), (unsigned int)NULL);/* Prologue SUCC */
-    PUT(heap_listp + (3*WSIZE), (unsigned int)NULL);/* Prologue PRED*/
-    PUT(heap_listp + (4*WSIZE), PACK(2*DSIZE, 1));  /* Prologue footer */
-    PUT(heap_listp + (5*WSIZE), PACK(0, 1));        /* Epilogue header */
+    PUT(heap_listp + (2*WSIZE), PACK(2*DSIZE, 1));  /* Prologue footer */
+    PUT(heap_listp + (3*WSIZE), PACK(0, 1));        /* Epilogue header */
     heap_listp += (2*WSIZE);                        /* heap_listp (always) points prologue block */
     
     for (int i = 0; i < 12; i++) {
@@ -113,7 +111,7 @@ int mm_init(void)
     }
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-    if (extend_heap(32) == NULL)   // higher util index, why?
+    if (extend_heap(32) == NULL)   // higher util index(+2), why?
         return -1;
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL)   // if fails
         return -1;
