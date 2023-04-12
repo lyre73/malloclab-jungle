@@ -75,16 +75,13 @@ extern void *mm_malloc(size_t size);
 extern void mm_free(void *ptr);
 
 /* my function prototypes */
-#include <stdint.h>
-
 static void *extend_heap(size_t);
 static void *coalesce(void *);
 static void *(find_fit(size_t));
 static void place(void *, size_t);
 
 static void *heap_listp;
-
-/* +) explicit free list */
+static void *findptr;
 
 /* 
  * mm_init - initialize the malloc package. return 0 if successful, -1 otherwise.
@@ -100,6 +97,7 @@ int mm_init(void)
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));    /* Prologue footer */
     PUT(heap_listp + (3*WSIZE), PACK(0, 1));        /* Epilogue header */
     heap_listp += (2*WSIZE);                        /* heap_listp (always) points prologue block */
+    findptr = heap_listp;
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL)   // if fails //HERE
         return -1;
@@ -206,8 +204,11 @@ static void *coalesce(void *bp)
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); // next block is allocated: 1, else: 0
     size_t size = GET_SIZE(HDRP(bp));                   // size of current block
 
+    // int flag = 0;
+    // if (findptr == bp || findptr == PREV_BLKP(bp) || findptr == NEXT_BLKP(bp))
+    //     flag = 1;
     if (prev_alloc && next_alloc)               /* Case 1, only current block is free */
-        {}  // no need
+        {}
 
     else if (prev_alloc && !next_alloc) {       /* Case 2, current and next block is free */
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));  // update size of current block: add next block size
@@ -229,35 +230,39 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));// update footer which originally was next block's footer
         bp = PREV_BLKP(bp);                     // update current block pointer to original prev block's pointer
     }
-
+    findptr = bp;
     return bp;  // returns current block(newly coalesced block)'s start address
 }
 
-/* finds free block to place the new allocation, by best-fit */
+/* finds free block to place the new allocation, by next-fit */
 static void *find_fit(size_t asize) // asize: bytes
 {
     // printf("find_fit ");
-    void *best_fit = NULL;
-    size_t min_disparity = SIZE_MAX;
-    // while (size > 0) { // until epilogue block
-    //     if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize))
-    //         return bp;
-    //     // update bp and currentsize
-    //     bp = NEXT_BLKP(bp);
-    //     size = GET_SIZE(HDRP(bp));
-    // }
-    for (void *bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-        if (GET_ALLOC(HDRP(bp)) == 0) {
-            if (GET_SIZE(HDRP(bp)) == asize) {
-                return bp;
-            } else if (GET_SIZE(HDRP(bp)) > asize && min_disparity > GET_SIZE(HDRP(bp)) - asize) {
-                best_fit = bp;
-                min_disparity = GET_SIZE(HDRP(bp)) - asize;
-            }
+    void *bp = findptr; // points start block to find
+    size_t size = GET_SIZE(HDRP(bp)); // bytes
+    // 이전 마지막 탐색 블록(의 다음 가용 블록 = findptr)부터->블록 헤더->블록 헤더->블록 헤더->에필로그 헤더까지 돌면서 맞는 사이즈 있으면 그 주소 반환
+    // 없으면 처음부터 마지막 탐색 블록 마주칠때까지 돌면서 맞는 사이즈 있으면 그 주소 반환
+    while (size > 0) { // until epilogue block
+        if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize)) {
+            findptr = bp;
+            return bp;
         }
+        // update bp and currentsize
+        bp = NEXT_BLKP(bp);
+        size = GET_SIZE(HDRP(bp));
     }
-
-    return best_fit;
+    bp = heap_listp;
+    size = GET_SIZE(HDRP(bp));
+    while (bp != findptr && size > 0) {
+        if ((GET_ALLOC(HDRP(bp)) == 0) && (size >= asize)) {
+            findptr = bp;
+            return bp;
+        }
+        // update bp and currentsize
+        bp = NEXT_BLKP(bp);
+        size = GET_SIZE(HDRP(bp));
+    }
+    return NULL;
 }
 
 static void place(void *bp, size_t asize)
@@ -278,7 +283,9 @@ static void place(void *bp, size_t asize)
         PUT(HDRP(bp), PACK(currentsize, 1));
         PUT(FTRP(bp), PACK(currentsize, 1));
     }
+    findptr = bp;
 }
+
 
 
 
