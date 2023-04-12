@@ -84,12 +84,11 @@ static void *heap_listp;
 
 #define SUCC_BLKP(bp)   *((char **)(bp))            /* get start address of a block's payload, return the address of payload of predecessor block */
 #define PRED_BLKP(bp)   *((char **)((bp) + WSIZE))    /* get start address of a block's payload, return the address of payload of successor block */
+#define FREE_LIST(class)    ((char **)(heap_listp + (class)*WSIZE))
 
 int splice_out(void *);
 int splice_in(void *bp);
 int get_class(size_t size); // 사이즈 클래스 찾기
-
-void *free_listp[12];
 
 /* 
  * mm_init - initialize the malloc package. return 0 if successful, -1 otherwise.
@@ -98,21 +97,20 @@ int mm_init(void)
 {
     // printf("init\n");
     /* Create the initial empty heap */
-    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) /* extends heap by 6 words and returns start address of new area. if fails, return -1 */
+    if ((heap_listp = mem_sbrk(16*WSIZE)) == (void *)-1) /* extends heap by 16 words and returns start address of new area. if fails, return -1 */
         return -1;
     PUT(heap_listp, 0);                             /* Alignment padding */
-    PUT(heap_listp + (1*WSIZE), PACK(2*DSIZE, 1));  /* Prologue header */
-    PUT(heap_listp + (2*WSIZE), PACK(2*DSIZE, 1));  /* Prologue footer */
-    PUT(heap_listp + (3*WSIZE), PACK(0, 1));        /* Epilogue header */
-    heap_listp += (2*WSIZE);                        /* heap_listp (always) points prologue block */
-    
-    for (int i = 0; i < 12; i++) {
-        free_listp[i] = NULL;
+    PUT(heap_listp + (1*WSIZE), PACK(7*DSIZE, 1));  /* Prologue header */
+    for (int i = 2; i < 14; i++) {                  /* initialize SUCC for each class */
+        PUT(heap_listp + (i*WSIZE), (unsigned int)NULL);
     }
+    PUT(heap_listp + (14*WSIZE), PACK(7*DSIZE, 1));  /* Prologue footer */
+    PUT(heap_listp + (15*WSIZE), PACK(0, 1));        /* Epilogue header */
+    heap_listp += (2*WSIZE);                        /* heap_listp (always) points prologue block */
 
-    /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(32) == NULL)   // higher util index(+2), why?
         return -1;
+    /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL)   // if fails
         return -1;
     return 0;
@@ -192,7 +190,7 @@ void *mm_realloc(void *ptr, size_t size)
 /* Extend the empty heap with a free block of size of given words. if fails, return NULL */
 static void *extend_heap(size_t words)
 {
-    // printf("extend_heap ");
+    // printf("extend_heap \n");
     char *bp;
     size_t size;
 
@@ -213,10 +211,13 @@ static void *extend_heap(size_t words)
 /* merges adjacent free blocks and returns start pointer of the new free block */
 static void *coalesce(void *bp)
 {
-    // printf("coalesce ");
+    // printf("coalesce \n");
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp))); // previous block is allocated: 1, else: 0
+    // // printf("prev_alloc:%d\n", prev_alloc);
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); // next block is allocated: 1, else: 0
+    // // printf("next_alloc:%d\n", next_alloc);
     size_t size = GET_SIZE(HDRP(bp));                   // size of current block
+    // // printf("size:%d\n", size);
 
     if (prev_alloc && next_alloc)               /* Case 1, only current block is free */
         {}  // no need
@@ -245,7 +246,7 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));// update footer which originally was next block's footer
         bp = PREV_BLKP(bp);                     // update current block pointer to original prev block's pointer
     }
-    
+
     splice_in(bp);
 
     return bp;  // returns current block(newly coalesced block)'s start address
@@ -256,9 +257,9 @@ static void *find_fit(size_t asize) // asize: bytes
 {
     // printf("find_fit ");
     // TODO: first fit for LIFO explicit list
-    int class = get_class(asize);
-    for (; class <= 11; class++){
-        void *bp = free_listp[class]; // points first block in free list
+    for (int class = get_class(asize); class <= 11; class++){
+        // void *bp = free_listp[class]; // points first block in free list
+        void *bp = *FREE_LIST(class);
         // 처음부터 프롤로그SUCC->SUCC->SUCC->NULL일 까지 돌면서 맞는 사이즈 있으면 그 주소 반환
         while (bp != NULL) {
             if (GET_SIZE(HDRP(bp)) >= asize)
@@ -294,18 +295,24 @@ static void place(void *bp, size_t asize)
 
 int splice_out(void *bp)
 {
-    // printf("splice_out ");
-    // printf("(removing block size: %d, remove from class %d) ", GET_SIZE(HDRP(bp)), get_class(GET_SIZE(HDRP(bp))));
+    // printf("splice_out \n");
+    // printf("(removing block size: %d, remove from class %d) \n", GET_SIZE(HDRP(bp)), get_class(GET_SIZE(HDRP(bp))));
     /* splice out the block(bp) from the list */
     // update predecessor block's successor <- block's successor
-    if (PRED_BLKP(bp) != NULL) {
-        SUCC_BLKP(PRED_BLKP(bp)) = SUCC_BLKP(bp);
-    } else {
-        free_listp[get_class(GET_SIZE(HDRP(bp)))] = SUCC_BLKP(bp);
-    }
+    SUCC_BLKP(PRED_BLKP(bp)) = SUCC_BLKP(bp);
     // update successor block's predecessor <- block's predecessor
     if (SUCC_BLKP(bp) != NULL)
         PRED_BLKP(SUCC_BLKP(bp)) = PRED_BLKP(bp);
+
+    // // update predecessor block's successor <- block's successor
+    // if (PRED_BLKP(bp) != NULL) {
+    //     SUCC_BLKP(PRED_BLKP(bp)) = SUCC_BLKP(bp);
+    // } else {
+    //     free_listp[get_class(GET_SIZE(HDRP(bp)))] = SUCC_BLKP(bp);
+    // }
+    // // update successor block's predecessor <- block's predecessor
+    // if (SUCC_BLKP(bp) != NULL)
+    //     PRED_BLKP(SUCC_BLKP(bp)) = PRED_BLKP(bp);
     
 
     return 0;
@@ -313,17 +320,34 @@ int splice_out(void *bp)
 
 int splice_in(void *bp)
 {
-    // printf("splice_in ");
+    // printf("splice_in \n");
     int class = get_class(GET_SIZE(HDRP(bp)));
-    // printf("(inserting block size: %d, class %d) ", GET_SIZE(HDRP(bp)), class);
-    // update PRED, SUCC of new free block                  
-        PRED_BLKP(bp) = NULL;               // update PRED of new free block
-        SUCC_BLKP(bp) = free_listp[class];         // initialize SUCC of new free block
+    // printf("(inserting block size: %d, class %d) \n", GET_SIZE(HDRP(bp)), class);
+    void *pred = FREE_LIST(class);
 
-        if (free_listp[class] != NULL) {           // if the list was not empty
-            PRED_BLKP(free_listp[class]) = bp;     // update PRED of previously first free block(previously SUCC of root)
+    while ((void *)SUCC_BLKP(pred) == NULL) {
+        if (SUCC_BLKP(pred) == NULL) {  // meet the end of the list
+            // initialize newly inserting block
+            SUCC_BLKP(bp) = NULL;
+            PRED_BLKP(bp) = pred;
+            // splice successor and newly inserting block
+            SUCC_BLKP(pred) = bp;
+            return 0;
         }
-        free_listp[class] = bp;                // update root(free_listp)
+        pred = SUCC_BLKP(pred); // splice predecessor and newly inserting block
+    }
+    SUCC_BLKP(bp) = SUCC_BLKP(pred);
+    PRED_BLKP(bp) = pred;
+    PRED_BLKP(SUCC_BLKP(pred)) = bp;
+    SUCC_BLKP(pred) = bp;
+    // // update PRED, SUCC of new free block                  
+    //     PRED_BLKP(bp) = NULL;               // update PRED of new free block
+    //     SUCC_BLKP(bp) = free_listp[class];         // initialize SUCC of new free block
+
+    //     if (free_listp[class] != NULL) {           // if the list was not empty
+    //         PRED_BLKP(free_listp[class]) = bp;     // update PRED of previously first free block(previously SUCC of root)
+    //     }
+    //     free_listp[class] = bp;                // update root(free_listp)
     return 0;
 }
 
@@ -334,7 +358,7 @@ int get_class(size_t asize)
     while (size < asize) {
         size *= 2;
         class++;
-        if (class == 11) break;
+        if (class >= 11) break;
     }
     return class;
 }
