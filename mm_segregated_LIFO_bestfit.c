@@ -1,15 +1,14 @@
-/* 
- * mm-seglist.c 
- * + segregated with size order
- * + first fit
- * + immediate coalescing
+/*
+ * mm-naive.c - The fastest, least memory-efficient malloc package.
  * 
- * Every block has a header and a footer which contains its size and allocation data.
- * Allocated blocks have payload and optianally paidding.
- * Free blocks have PRED and SUCC for doubly linked free list.
- * Blocks will be coalesed every time when there's a new free block which has free adjecent block(s).
- * Realloc is implemented directly using mm_malloc and mm_free.
- * Blocks can be splitted when placing a new block.
+ * In this naive approach, a block is allocated by simply incrementing
+ * the brk pointer.  A block is pure payload. There are no headers or
+ * footers.  Blocks are never coalesced or reused. Realloc is
+ * implemented directly using mm_malloc and mm_free.
+ *
+ * NOTE TO STUDENTS: Replace this header comment with your own header
+ * comment that gives a high level description of your solution.
+ * mm
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,6 +38,12 @@ team_t team = {
 
 /* single word (4) or double word (8) alignment */
 #define ALIGNMENT 8
+
+/* rounds up to the nearest multiple of ALIGNMENT */
+#define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+
+
+#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
@@ -76,17 +81,17 @@ static void *coalesce(void *);
 static void *(find_fit(size_t));
 static void place(void *, size_t);
 
-static void *heap_listp;    /* will always points to the prologue block */
+static void *heap_listp;
 
 #include <stdint.h>
 
 #define SUCC_BLKP(bp)   *((char **)(bp))            /* get start address of a block's payload, return the address of payload of predecessor block */
 #define PRED_BLKP(bp)   *((char **)((bp) + WSIZE))    /* get start address of a block's payload, return the address of payload of successor block */
-#define FREE_LIST(class)    ((char **)(heap_listp + (class)*WSIZE)) /* get class index, return the root pointer of the class list */
+#define FREE_LIST(class)    ((char **)(heap_listp + (class)*WSIZE))
 
 int splice_out(void *);
 int splice_in(void *bp);
-int get_class(size_t size); /* get the size of a block, determine the index of class which contains the size */
+int get_class(size_t size); // 사이즈 클래스 찾기
 
 /* 
  * mm_init - initialize the malloc package. return 0 if successful, -1 otherwise.
@@ -99,17 +104,17 @@ int mm_init(void)
         return -1;
     PUT(heap_listp, 0);                             /* Alignment padding */
     PUT(heap_listp + (1*WSIZE), PACK(7*DSIZE, 1));  /* Prologue header */
-    for (int i = 2; i < 14; i++) {                  /* Initialize SUCCs by NULL for each size class */
+    for (int i = 2; i < 14; i++) {                  /* initialize SUCC for each class */
         PUT(heap_listp + (i*WSIZE), (unsigned int)NULL);
     }
-    PUT(heap_listp + (14*WSIZE), PACK(7*DSIZE, 1)); /* Prologue footer */
-    PUT(heap_listp + (15*WSIZE), PACK(0, 1));       /* Epilogue header */
+    PUT(heap_listp + (14*WSIZE), PACK(7*DSIZE, 1));  /* Prologue footer */
+    PUT(heap_listp + (15*WSIZE), PACK(0, 1));        /* Epilogue header */
     heap_listp += (2*WSIZE);                        /* heap_listp (always) points prologue block */
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-    if (extend_heap(32) == NULL)   // higher util index(+2), b/c there's many small size allocating on the TC
+    if (extend_heap(32) == NULL)   // higher util index(+2), why?
         return -1;
-    if (extend_heap(CHUNKSIZE/WSIZE) == NULL)
+    if (extend_heap(CHUNKSIZE/WSIZE) == NULL)   // if fails
         return -1;
     return 0;
 }
@@ -120,9 +125,10 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
+    // printf("\nmalloc(%d): \t", size);
     size_t asize;       /* Adjusted block size */
     size_t extendsize;  /* Amount to extend heap if no fit */
-    char *bp;           /* will point to the payload address of the newly placed block */
+    char *bp;
 
     /* Ignore spurious request */
     if (size == 0)
@@ -130,20 +136,20 @@ void *mm_malloc(size_t size)
 
     /* Adjust block size to include overhead and alignment reqs. (bytes) */
     if (size <= DSIZE)
-        asize = 2 * DSIZE;      // minimum block size: 2 * DSIZE = 16 bytes(4 words) (+allocated block has footer too)
+        asize = 2 * DSIZE;      // minimum block size: 2 * DSIZE = 16 bytes(4 words) -> allocated block has footer too?
     else
         asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE); // calculate right block size for the data
     /* Search the free list for a fit */
     if ((bp = find_fit(asize)) != NULL) { // if usable free block is found
         place(bp, asize);   // place new block of size asize on the free block(분할)
-        return bp; // return payload address of the newly placed block
+        return bp; // return start address of the new block
     }
 
     /* No fit found. Get more memory and place the block */
-    extendsize = MAX(asize, CHUNKSIZE); // use bigger one to prevent segmentation fault(using over heap)
-    if ((bp = extend_heap(extendsize/WSIZE)) == NULL)   // if fails: return NULL(says it failed)
+    extendsize = MAX(asize, CHUNKSIZE);
+    if ((bp = extend_heap(extendsize/WSIZE)) == NULL)   // if fails: return NULL
         return NULL;
-    place(bp, asize);   // place new block whose size is asize on the newly freed block
+    place(bp, asize);   // place new block of size asize on the new free block
     return bp;  // return start address of the new allocated block
 }
 
@@ -152,10 +158,11 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr) // ptr is start address of the block we want to free
 {
+    // printf("\nfree ");
     size_t size = GET_SIZE(HDRP(ptr));   // get the size(bytes) of current block
 
-    PUT(HDRP(ptr), PACK(size, 0));       // update header: says it's free!
-    PUT(FTRP(ptr), PACK(size, 0));       // update footer: says it's free!
+    PUT(HDRP(ptr), PACK(size, 0));       // update header: says free!
+    PUT(FTRP(ptr), PACK(size, 0));       // update footer: says free!
     coalesce(ptr);                       // check and coalesce adjecent blocks
 }
 
@@ -164,17 +171,19 @@ void mm_free(void *ptr) // ptr is start address of the block we want to free
  */
 void *mm_realloc(void *ptr, size_t size)
 {
+    // printf("realloc\n");
+    // if made other functions well, it would work good without changing any(maybe)
     void *oldptr = ptr; // initiallize oldptr to given ptr
     void *newptr;
-    size_t copySize;  // 
-    
+    size_t copySize;
     
     newptr = mm_malloc(size);   // newptr is destination memory location
     if (newptr == NULL)
-        return NULL;
-    copySize = GET_SIZE(HDRP(oldptr)) - DSIZE; //  only use payload size of the block(of oldptr). - DSIZE is b/c header and footer -> only payload size
-    if (size < copySize)  // copySize is smaller one
-        copySize = size;
+      return NULL;
+    // copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);   // oldptr (payload?) size?
+    copySize = GET_SIZE(HDRP(oldptr)) - DSIZE;  // only payload size
+    if (size < copySize)
+      copySize = size;  // copySize is smaller one
     memcpy(newptr, oldptr, copySize);
     mm_free(oldptr);
     return newptr;
@@ -185,6 +194,7 @@ void *mm_realloc(void *ptr, size_t size)
 /* Extend the empty heap with a free block of size of given words. if fails, return NULL */
 static void *extend_heap(size_t words)
 {
+    // printf("extend_heap ");
     char *bp;
     size_t size;
 
@@ -205,22 +215,23 @@ static void *extend_heap(size_t words)
 /* merges adjacent free blocks and returns start pointer of the new free block */
 static void *coalesce(void *bp)
 {
+    // printf("coalesce ");
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp))); // previous block is allocated: 1, else: 0
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); // next block is allocated: 1, else: 0
     size_t size = GET_SIZE(HDRP(bp));                   // size of current block
 
     if (prev_alloc && next_alloc)               /* Case 1, only current block is free */
-        {}  // no need, but for readability
+        {}  // no need
 
     else if (prev_alloc && !next_alloc) {       /* Case 2, current and next block is free */
-        splice_out(NEXT_BLKP(bp));              // remove coalescing block from the free list
+        splice_out(NEXT_BLKP(bp));
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));  // update size of current block: add next block size
         PUT(HDRP(bp), PACK(size, 0));           // update header
         PUT(FTRP(bp), PACK(size, 0));           // update footer which originally was next block's footer
     }
 
     else if (!prev_alloc && next_alloc) {       /* Case 3, current and prev block is free */
-        splice_out(PREV_BLKP(bp));              // remove coalescing block from the free list
+        splice_out(PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));  // update size of current block: add prev block size
         PUT(FTRP(bp), PACK(size, 0));           // update footer
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));// update header which originally was prev block's header
@@ -228,10 +239,8 @@ static void *coalesce(void *bp)
     }
 
     else {                                      /* Case 4 */
-        // remove coalescing block from the free list
         splice_out(PREV_BLKP(bp));
         splice_out(NEXT_BLKP(bp));
-
         // update size of current block: add prev and next blocks' size 
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));// update header which originally was prev block's header
@@ -239,32 +248,43 @@ static void *coalesce(void *bp)
         bp = PREV_BLKP(bp);                     // update current block pointer to original prev block's pointer
     }
     
-    splice_in(bp);  // add coalesced block to the free list
+    splice_in(bp);
 
     return bp;  // returns current block(newly coalesced block)'s start address
 }
 
-/* finds free block to place the new allocation, by first-fit(with segregated free list, would be closer to best fit) */
-static void *find_fit(size_t asize) // asize: bytes, not words
+/* finds free block to place the new allocation, by best-fit */
+static void *find_fit(size_t asize) // asize: bytes
 {
-    for (int class = get_class(asize); class <= 11; class++){   // from the fittest class to bigger ones
-        // 처음부터 프롤로그SUCC->SUCC->SUCC->NULL일 까지 돌면서 맞는 사이즈 있으면 그 주소 반환
+    // printf("find_fit ");
+    // TODO: first fit for LIFO explicit list
+    size_t min_disparity = SIZE_MAX;
+    void *best_fit = NULL;
+    
+    for (int class = get_class(asize); class <= 11; class++) {
         for (void *bp = *FREE_LIST(class); bp != NULL; bp = SUCC_BLKP(bp)) {
-            if (GET_SIZE(HDRP(bp)) >= asize) {  // target block found
+            if (GET_SIZE(HDRP(bp)) == asize) {
                 return bp;
+            } else if (GET_SIZE(HDRP(bp)) > asize && min_disparity > GET_SIZE(HDRP(bp)) - asize) {
+                best_fit = bp;
+                min_disparity = GET_SIZE(HDRP(bp)) - asize;
             }
         }
+        if (best_fit != NULL) {
+            break;
+        }
     }
-    return NULL;
+    return best_fit;
 }
 
-/* places requested block at the beginning of the current free block(bp), */
-/* splitting only if the size of the remainder would equal or exeed the minimum block size(4 words) */
 static void place(void *bp, size_t asize)
 {
+    // printf("place ");
+    // place requested block at the beginning of the current free block(bp),
+    // splitting only if the size of the remainder would equal or exeed the minimum block size
     size_t currentsize = GET_SIZE(HDRP(bp));
-    splice_out(bp); // remove target block from free list(b/c will not be a free block anymore)
-    if (currentsize - asize >= 2 * DSIZE) { // if the remainder would equal or exeed the minimum block size, split
+    splice_out(bp);
+    if (currentsize - asize >= 2 * DSIZE) { // the remainder would equal or exeed the minimum block size, split
         PUT(HDRP(bp), PACK(asize, 1));              // update new allocated header, which was original header
         PUT(FTRP(bp), PACK(asize, 1));              // update new allocated footer
         
@@ -273,54 +293,47 @@ static void place(void *bp, size_t asize)
         PUT(FTRP(bp), PACK(currentsize-asize, 0));  // update footer of remainder free block, which was original footer
 
         splice_in(bp); // splice new remainder free block into the free list
-    } else { // when you won't split
+    } else { // don't split
         // update header and footer, say allocated!
         PUT(HDRP(bp), PACK(currentsize, 1));
         PUT(FTRP(bp), PACK(currentsize, 1));
     }
 }
 
-/* splice out the block(whose payload address is bp) from the free list */
 int splice_out(void *bp)
 {
+    // printf("splice_out ");
+    /* splice out the block(bp) from the list */
     // update predecessor block's successor <- block's successor
-    SUCC_BLKP(PRED_BLKP(bp)) = SUCC_BLKP(bp);
+    if (PRED_BLKP(bp) != NULL) {
+        SUCC_BLKP(PRED_BLKP(bp)) = SUCC_BLKP(bp);
+    } else {
+        *FREE_LIST(get_class(GET_SIZE(HDRP(bp)))) = SUCC_BLKP(bp);
+    }
     // update successor block's predecessor <- block's predecessor
-    if (SUCC_BLKP(bp) != NULL) { // only if it exists
+    if (SUCC_BLKP(bp) != NULL)
         PRED_BLKP(SUCC_BLKP(bp)) = PRED_BLKP(bp);
-    }
+    
 
     return 0;
 }
 
-/* splice in the block(whose payload address is bp) into the correct free list */
-int splice_in(void *bp) // 크기는 오름차순으로 정렬해서 리스트에 넣는다
+int splice_in(void *bp) // 크기 내림차순으로 정렬해서 리스트에 넣기
 {
-    size_t size = GET_SIZE(HDRP(bp));
-    int class = get_class(size);
-    void *pred = FREE_LIST(class);
-    void *succ = SUCC_BLKP(pred);
+    // printf("splice_in ");
+    int class = get_class(GET_SIZE(HDRP(bp)));
+    // printf("(inserting block size: %d, class %d) ", GET_SIZE(HDRP(bp)), class);
+    // update PRED, SUCC of new free block                  
+        PRED_BLKP(bp) = NULL;               // update PRED of new free block
+        SUCC_BLKP(bp) = *FREE_LIST(class);         // initialize SUCC of new free block
 
-    // find where to splice in: predecessor <= size <= successor
-    while (succ != NULL) {  // end of the list(there's no successor) (+ predecessor will always be: FREE_LIST(class))
-        if (GET_SIZE(HDRP(pred)) <= size && size <= GET_SIZE(HDRP(succ))) { // found correct place
-            PRED_BLKP(succ) = bp;   // update PRED of successor
-            break;
+        if (*FREE_LIST(class) != NULL) {           // if the list was not empty
+            PRED_BLKP(*FREE_LIST(class)) = bp;     // update PRED of previously first free block(previously SUCC of root)
         }
-        // go look at next blocks
-        pred = SUCC_BLKP(pred);
-        succ = SUCC_BLKP(pred);
-    }
-    // update current block's PRED and SUCC
-    PRED_BLKP(bp) = pred;
-    SUCC_BLKP(bp) = succ;
-    // update SUCC of predecessor
-    SUCC_BLKP(pred) = bp;
-
+        *FREE_LIST(class) = bp;                // update root(free_listp)
     return 0;
 }
 
-/* get the size of a block, determine the index of class which contains the size */
 int get_class(size_t asize)
 {
     int class = 0;
