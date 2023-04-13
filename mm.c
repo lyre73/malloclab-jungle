@@ -40,6 +40,8 @@ team_t team = {
 /* single word (4) or double word (8) alignment */
 #define ALIGNMENT 8
 
+// 여기 지운 거 완전 좋은 거였구나 이런
+
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
 #define DSIZE       8       /* Double word size (bytes) */
@@ -74,7 +76,7 @@ extern void mm_free(void *ptr);
 static void *extend_heap(size_t);
 static void *coalesce(void *);
 static void *(find_fit(size_t));
-static void place(void *, size_t);
+static void *place(void *, size_t);
 
 static void *heap_listp;    /* will always points to the prologue block */
 
@@ -135,7 +137,7 @@ void *mm_malloc(size_t size)
         asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE); // calculate right block size for the data
     /* Search the free list for a fit */
     if ((bp = find_fit(asize)) != NULL) { // if usable free block is found
-        place(bp, asize);   // place new block of size asize on the free block(분할)
+        bp = place(bp, asize);   // place new block of size asize on the free block(분할) and update bp to newly allocated block
         return bp; // return payload address of the newly placed block
     }
 
@@ -143,7 +145,7 @@ void *mm_malloc(size_t size)
     extendsize = MAX(asize, CHUNKSIZE); // use bigger one to prevent segmentation fault(using over heap)
     if ((bp = extend_heap(extendsize/WSIZE)) == NULL)   // if fails: return NULL(says it failed)
         return NULL;
-    place(bp, asize);   // place new block whose size is asize on the newly freed block
+    bp = place(bp, asize);   // place new block whose size is asize on the newly freed block and update bp to newly allocated block
     return bp;  // return start address of the new allocated block
 }
 
@@ -258,26 +260,35 @@ static void *find_fit(size_t asize) // asize: bytes, not words
     return NULL;
 }
 
-/* places requested block at the beginning of the current free block(bp), */
+/* places requested block on current free block(bp), */
 /* splitting only if the size of the remainder would equal or exeed the minimum block size(4 words) */
-static void place(void *bp, size_t asize)
+/* if the block to be placed is bigger, place it on the back, else on the front(beginning) */
+static void *place(void *bp, size_t asize)
 {
     size_t currentsize = GET_SIZE(HDRP(bp));
     splice_out(bp); // remove target block from free list(b/c will not be a free block anymore)
-    if (currentsize - asize >= 2 * DSIZE) { // if the remainder would equal or exeed the minimum block size, split
-        PUT(HDRP(bp), PACK(asize, 1));              // update new allocated header, which was original header
-        PUT(FTRP(bp), PACK(asize, 1));              // update new allocated footer
-        
-        bp = NEXT_BLKP(bp);                         // update bp to point to remainder free block
-        PUT(HDRP(bp), PACK(currentsize-asize, 0));  // update header of remainder free block
-        PUT(FTRP(bp), PACK(currentsize-asize, 0));  // update footer of remainder free block, which was original footer
-
-        splice_in(bp); // splice new remainder free block into the free list
-    } else { // when you won't split
+    if (currentsize - asize <= 2 * DSIZE) { // when you won't split
         // update header and footer, say allocated!
         PUT(HDRP(bp), PACK(currentsize, 1));
         PUT(FTRP(bp), PACK(currentsize, 1));
+    } else if (asize >= 100) {              // split the block, asize is big
+        PUT(HDRP(bp), PACK(currentsize-asize, 0));  // update header of remainder free block
+        PUT(FTRP(bp), PACK(currentsize-asize, 0));  // update footer of remainder free block, which was original footer
+        splice_in(bp);
+
+        bp = NEXT_BLKP(bp);                         // update bp to point allocated block
+        PUT(HDRP(bp), PACK(asize, 1));              // update new allocated header, which was original header
+        PUT(FTRP(bp), PACK(asize, 1));              // update new allocated footer
+    } else {                                // split the block, asize is small
+        PUT(HDRP(bp), PACK(asize, 1));              // update new allocated header, which was original header
+        PUT(FTRP(bp), PACK(asize, 1));              // update new allocated footer
+        
+                                                    // don't update bp here to keep bp pointing allocated block
+        PUT(HDRP(NEXT_BLKP(bp)), PACK(currentsize-asize, 0));  // update header of remainder free block
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(currentsize-asize, 0));  // update footer of remainder free block, which was original footer
+        splice_in(NEXT_BLKP(bp));
     }
+    return bp;
 }
 
 /* splice out the block(whose payload address is bp) from the free list */
